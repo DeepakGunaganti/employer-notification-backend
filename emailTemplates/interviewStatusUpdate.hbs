@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interview Status Update</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        .email-container {
+            max-width: 600px;
+            margin: 20px auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        .header {
+            background-color: #059669; /* Emerald 600 */
+            color: #ffffff;
+            padding: 20px;
+            text-align: center;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        .content {
+            padding: 30px;
+            color: #333333;
+            line-height: 1.6;
+        }
+        .content p {
+            margin-bottom: 15px;
+        }
+        .status-box {
+            background-color: #ecfdf5; /* Emerald 50 */
+            border-left: 5px solid #059669; /* Emerald 600 */
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .status-box strong {
+            color: #059669;
+        }
+        .button-container {
+            text-align: center;
+            margin-top: 25px;
+            margin-bottom: 25px;
+        }
+        .button {
+            display: inline-block;
+            background-color: #059669; /* Emerald 600 */
+            color: #ffffff;
+            padding: 12px 25px;
+            border-radius: 5px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: background-color 0.3s ease;
+        }
+        .button:hover {
+            background-color: #047857; /* Emerald 700 */
+        }
+        .footer {
+            background-color: #f0f0f0;
+            color: #777777;
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            border-bottom-left-radius: 8px;
+            border-bottom-right-radius: 8px;
+        }
+        .footer a {
+            color: #059669;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="header">
+            <h1>Interview Status Update</h1>
+        </div>
+        <div class="content">
+            <p>Hello {{employerName}},</p>
+            <p>The interview status for <strong>{{candidateName}}</strong> regarding the <strong>"{{jobTitle}}"</strong> position has been updated:</p>
+            <div class="status-box">
+                <p><strong>Status:</strong> {{interviewStatus}}</p>
+                {{#if interviewDate}}
+                    <p><strong>Date:</strong> {{interviewDate}}</p>
+                {{/if}}
+                {{#if interviewTime}}
+                    <p><strong>Time:</strong> {{interviewTime}}</p>
+                {{/if}}
+                {{#if interviewPlatform}}
+                    <p><strong>Platform:</strong> {{interviewPlatform}}</p>
+                {{/if}}
+                {{#if reason}}
+                    <p><strong>Reason:</strong> {{reason}}</p>
+                {{/if}}
+            </div>
+            <p>For more details, please visit the interview page:</p>
+            <div class="button-container">
+                <a href="{{interviewLink}}" class="button">View Interview Details</a>
+            </div>
+            <p>Best regards,<br>The Hiring Team</p>
+        </div>
+        <div class="footer">
+            <p>&copy; {{currentYear}} Your Company Name. All rights reserved.</p>
+            <p>You received this email because you are registered as an employer on our platform.</p>
+            <p><a href="#">Unsubscribe</a> | <a href="#">Manage Preferences</a></p>
+        </div>
+    </div>
+</body>
+</html>

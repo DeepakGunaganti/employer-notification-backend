@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../employer-notification-frontend"
+		},
+		{
+			"path": "."
+		}
+	],
+	"settings": {}
+}
