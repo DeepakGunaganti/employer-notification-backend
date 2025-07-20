@@ -16,41 +16,60 @@ const admin = require('firebase-admin');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Determine CORS origin based on environment
-// In production, this will be your deployed frontend URL (e.g., https://your-frontend.vercel.app)
-// In development, it's localhost:3000
 const allowedOrigin = process.env.NODE_ENV === 'production'
-  ? process.env.FRONTEND_URL // This environment variable needs to be set in Render
+  ? process.env.FRONTEND_URL
   : 'http://localhost:3000';
 
 const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigin, // Use the dynamically determined origin
-    methods: ["GET", "POST", "PUT", "DELETE"] // Ensure all necessary methods are allowed
+    origin: allowedOrigin,
+    methods: ["GET", "POST", "PUT", "DELETE"]
   }
 });
 
+// --- Firebase Admin SDK Initialization (MODIFIED TO READ INDIVIDUAL ENV VARS) ---
 try {
-  // Firebase Admin SDK Initialization
-  // In production, the service account key will be passed as an environment variable (stringified JSON)
-  let serviceAccount;
-  if (process.env.NODE_ENV === 'production' && process.env.FIREBASE_ADMIN_KEY_JSON) {
-    serviceAccount = JSON.parse(process.env.FIREBASE_ADMIN_KEY_JSON);
+  let serviceAccountConfig;
+
+  if (process.env.NODE_ENV === 'production') {
+    // In production, reconstruct service account from individual environment variables
+    // IMPORTANT: The private_key needs its newline characters restored from the escaped string
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined;
+
+    serviceAccountConfig = {
+      type: process.env.FIREBASE_TYPE,
+      project_id: process.env.FIREBASE_PROJECT_ID_ADMIN, // Using a distinct name for clarity
+      private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
+      private_key: privateKey, // Use the reconstructed private key
+      client_email: process.env.FIREBASE_CLIENT_EMAIL,
+      client_id: process.env.FIREBASE_CLIENT_ID,
+      auth_uri: process.env.FIREBASE_AUTH_URI,
+      token_uri: process.env.FIREBASE_TOKEN_URI,
+      auth_provider_x509_cert_url: process.env.FIREBASE_AUTH_PROVIDER_X509_CERT_URL,
+      client_x509_cert_url: process.env.FIREBASE_CLIENT_X509_CERT_URL
+    };
+    // Basic check to ensure critical fields are present
+    if (!serviceAccountConfig.project_id || !serviceAccountConfig.private_key || !serviceAccountConfig.client_email) {
+      throw new Error("Missing one or more critical Firebase Admin environment variables for production.");
+    }
+
   } else {
-    // For local development, load from file
-    serviceAccount = require('./firebase-admin-key.json');
+    // For local development, load from file as before
+    serviceAccountConfig = require('./firebase-admin-key.json');
   }
 
   admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
+    credential: admin.credential.cert(serviceAccountConfig)
   });
   console.log('Firebase Admin SDK initialized.');
 } catch (error) {
-  console.error('CRITICAL ERROR: Firebase Admin SDK initialization failed. Ensure firebase-admin-key.json is present/valid locally, or FIREBASE_ADMIN_KEY_JSON env var is set in production.', error);
+  console.error('CRITICAL ERROR: Firebase Admin SDK initialization failed. Details:', error);
+  console.error('Please ensure firebase-admin-key.json is present/valid locally, or ALL individual FIREBASE_ env vars are set correctly in production.');
   process.exit(1); // Exit if critical service fails to initialize
 }
+
 
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
@@ -65,7 +84,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// Use CORS middleware with dynamic origin
 app.use(cors({
   origin: allowedOrigin,
   methods: ["GET", "POST", "PUT", "DELETE"]
