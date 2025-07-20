@@ -17,13 +17,15 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 console.log(`[STARTUP] Attempting to start server on port: ${PORT}`);
 
-// CORRECTED: baseFrontendDomain now comes directly from env var (e.g., "employe-note-frontend.vercel.app")
+// Get the base frontend domain from environment variable
+// This FRONTEND_URL env var should be ONLY the base domain, e.g., "employe-note-frontend.vercel.app"
 const baseFrontendDomain = process.env.NODE_ENV === 'production'
-  ? process.env.FRONTEND_URL // This should now be ONLY the base domain, e.g., "employe-note-frontend.vercel.app"
-  : 'localhost:3000'; // For local, we'll keep it simple
+  ? process.env.FRONTEND_URL
+  : 'localhost:3000'; // For local development
 
 // Construct the allowed origins array for CORS
-// This will include "http://localhost:3000" for dev, and "https://base.domain" and "https://*.base.domain" for production
+// This will include "http://localhost:3000" for dev,
+// and "https://base.domain" and "https://*.base.domain" for production
 const allowedOrigins = [];
 if (process.env.NODE_ENV === 'production') {
   // Allow the base domain itself (e.g., https://employe-note-frontend.vercel.app)
@@ -54,9 +56,9 @@ const io = new Server(server, {
         }
         // Handle wildcard origins (e.g., https://*.vercel.app)
         if (allowed.startsWith('https://*.')) {
-          const baseDomainPattern = allowed.substring('https://*.'.length);
-          // Check if origin starts with https:// and ends with the base domain pattern, and has at least one subdomain part
-          return origin.startsWith('https://') && origin.endsWith(baseDomainPattern) && origin.length > `https://${baseDomainPattern}`.length + 'https://'.length;
+          const pattern = allowed.replace(/\./g, '\\.').replace(/\*/g, '.*'); // Escape dots, convert * to .*
+          const regex = new RegExp(`^${pattern}$`); // Create regex from pattern
+          return regex.test(origin);
         }
         return false;
       });
@@ -135,8 +137,9 @@ app.use(cors({
         return true;
       }
       if (allowed.startsWith('https://*.')) {
-        const baseDomainPattern = allowed.substring('https://*.'.length);
-        return origin.startsWith('https://') && origin.endsWith(baseDomainPattern) && origin.length > `https://${baseDomainPattern}`.length + 'https://'.length;
+        const pattern = allowed.replace(/\./g, '\\.').replace(/\*/g, '.*');
+        const regex = new RegExp(`^${pattern}$`);
+        return regex.test(origin);
       }
       return false;
     });
