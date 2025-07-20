@@ -17,14 +17,13 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 console.log(`[STARTUP] Attempting to start server on port: ${PORT}`);
 
-// Determine CORS origin based on environment
-// FRONTEND_URL env var should now be JUST the base domain, e.g., "employe-note-frontend.vercel.app"
+// CORRECTED: baseFrontendDomain now comes directly from env var (e.g., "employe-note-frontend.vercel.app")
 const baseFrontendDomain = process.env.NODE_ENV === 'production'
-  ? process.env.FRONTEND_URL // e.g., employe-note-frontend.vercel.app
+  ? process.env.FRONTEND_URL // This should now be ONLY the base domain, e.g., "employe-note-frontend.vercel.app"
   : 'localhost:3000'; // For local, we'll keep it simple
 
 // Construct the allowed origins array for CORS
-// This will include "http://localhost:3000" for dev, and "https://*.baseFrontendDomain" for production
+// This will include "http://localhost:3000" for dev, and "https://base.domain" and "https://*.base.domain" for production
 const allowedOrigins = [];
 if (process.env.NODE_ENV === 'production') {
   // Allow the base domain itself (e.g., https://employe-note-frontend.vercel.app)
@@ -50,13 +49,14 @@ const io = new Server(server, {
 
       // Check if the origin is in our allowed list or matches a wildcard pattern
       const isAllowed = allowedOrigins.some(allowed => {
-        if (allowed === origin) {
+        if (allowed === origin) { // Direct match (e.g., https://my-app.vercel.app)
           return true;
         }
         // Handle wildcard origins (e.g., https://*.vercel.app)
         if (allowed.startsWith('https://*.')) {
-          const baseDomain = allowed.substring('https://*.'.length);
-          return origin.startsWith('https://') && origin.endsWith(baseDomain) && origin.length > `https://${baseDomain}`.length;
+          const baseDomainPattern = allowed.substring('https://*.'.length);
+          // Check if origin starts with https:// and ends with the base domain pattern, and has at least one subdomain part
+          return origin.startsWith('https://') && origin.endsWith(baseDomainPattern) && origin.length > `https://${baseDomainPattern}`.length + 'https://'.length;
         }
         return false;
       });
@@ -135,8 +135,8 @@ app.use(cors({
         return true;
       }
       if (allowed.startsWith('https://*.')) {
-        const baseDomain = allowed.substring('https://*.'.length);
-        return origin.startsWith('https://') && origin.endsWith(baseDomain) && origin.length > `https://${baseDomain}`.length;
+        const baseDomainPattern = allowed.substring('https://*.'.length);
+        return origin.startsWith('https://') && origin.endsWith(baseDomainPattern) && origin.length > `https://${baseDomainPattern}`.length + 'https://'.length;
       }
       return false;
     });
