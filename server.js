@@ -18,12 +18,25 @@ const PORT = process.env.PORT || 5000;
 console.log(`[STARTUP] Attempting to start server on port: ${PORT}`);
 
 // Determine CORS origin based on environment
-// This FRONTEND_URL should now contain the wildcard, e.g., https://*.your-vercel-domain.vercel.app
-const allowedOriginPattern = process.env.NODE_ENV === 'production'
-  ? process.env.FRONTEND_URL // e.g., https://*.employe-note-frontend.vercel.app
-  : 'http://localhost:3000';
+// FRONTEND_URL env var should now be JUST the base domain, e.g., "employe-note-frontend.vercel.app"
+const baseFrontendDomain = process.env.NODE_ENV === 'production'
+  ? process.env.FRONTEND_URL // e.g., employe-note-frontend.vercel.app
+  : 'localhost:3000'; // For local, we'll keep it simple
 
-console.log(`[STARTUP] CORS allowed origin pattern: ${allowedOriginPattern}`);
+// Construct the allowed origins array for CORS
+// This will include "http://localhost:3000" for dev, and "https://*.baseFrontendDomain" for production
+const allowedOrigins = [];
+if (process.env.NODE_ENV === 'production') {
+  // Allow the base domain itself (e.g., https://employe-note-frontend.vercel.app)
+  allowedOrigins.push(`https://${baseFrontendDomain}`);
+  // Allow all subdomains (e.g., https://*.employe-note-frontend.vercel.app)
+  allowedOrigins.push(`https://*.${baseFrontendDomain}`);
+} else {
+  allowedOrigins.push('http://localhost:3000');
+}
+
+console.log(`[STARTUP] CORS allowed origins list: ${allowedOrigins.join(', ')}`);
+
 
 const server = http.createServer(app);
 
@@ -35,15 +48,24 @@ const io = new Server(server, {
       // Allow requests with no origin (like mobile apps or curl requests)
       if (!origin) return callback(null, true);
 
-      // Convert the allowedOriginPattern to a RegExp for flexible matching
-      // Escaping dots and replacing '*' with '.*'
-      const regexPattern = new RegExp(`^${allowedOriginPattern.replace(/\./g, '\\.').replace(/\*/g, '.*')}$`);
+      // Check if the origin is in our allowed list or matches a wildcard pattern
+      const isAllowed = allowedOrigins.some(allowed => {
+        if (allowed === origin) {
+          return true;
+        }
+        // Handle wildcard origins (e.g., https://*.vercel.app)
+        if (allowed.startsWith('https://*.')) {
+          const baseDomain = allowed.substring('https://*.'.length);
+          return origin.startsWith('https://') && origin.endsWith(baseDomain) && origin.length > `https://${baseDomain}`.length;
+        }
+        return false;
+      });
 
-      if (regexPattern.test(origin)) {
+      if (isAllowed) {
         console.log(`[CORS] Origin ${origin} allowed by Socket.IO.`);
         callback(null, true);
       } else {
-        console.warn(`[CORS] Origin ${origin} NOT allowed by Socket.IO. Pattern: ${allowedOriginPattern}`);
+        console.warn(`[CORS] Origin ${origin} NOT allowed by Socket.IO. Allowed patterns: ${allowedOrigins.join(', ')}`);
         callback(new Error('Not allowed by Socket.IO CORS'));
       }
     },
@@ -108,12 +130,22 @@ io.on('connection', (socket) => {
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
-    const regexPattern = new RegExp(`^${allowedOriginPattern.replace(/\./g, '\\.').replace(/\*/g, '.*')}$`);
-    if (regexPattern.test(origin)) {
+    const isAllowed = allowedOrigins.some(allowed => {
+      if (allowed === origin) {
+        return true;
+      }
+      if (allowed.startsWith('https://*.')) {
+        const baseDomain = allowed.substring('https://*.'.length);
+        return origin.startsWith('https://') && origin.endsWith(baseDomain) && origin.length > `https://${baseDomain}`.length;
+      }
+      return false;
+    });
+
+    if (isAllowed) {
       console.log(`[CORS] Origin ${origin} allowed by Express.`);
       callback(null, true);
     } else {
-      console.warn(`[CORS] Origin ${origin} NOT allowed by Express. Pattern: ${allowedOriginPattern}`);
+      console.warn(`[CORS] Origin ${origin} NOT allowed by Express. Allowed patterns: ${allowedOrigins.join(', ')}`);
       callback(new Error('Not allowed by Express CORS'));
     }
   },
