@@ -15,34 +15,56 @@ const admin = require('firebase-admin');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+console.log(`[STARTUP] Attempting to start server on port: ${PORT}`);
 
-const allowedOrigin = process.env.NODE_ENV === 'production'
-  ? process.env.FRONTEND_URL
+// Determine CORS origin based on environment
+// This FRONTEND_URL should now contain the wildcard, e.g., https://*.your-vercel-domain.vercel.app
+const allowedOriginPattern = process.env.NODE_ENV === 'production'
+  ? process.env.FRONTEND_URL // e.g., https://*.employe-note-frontend.vercel.app
   : 'http://localhost:3000';
+
+console.log(`[STARTUP] CORS allowed origin pattern: ${allowedOriginPattern}`);
 
 const server = http.createServer(app);
 
+// Initialize Socket.io server with dynamic origin handling and credentials
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigin,
-    methods: ["GET", "POST", "PUT", "DELETE"]
+    // Use a function to dynamically allow origins matching the pattern
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+
+      // Convert the allowedOriginPattern to a RegExp for flexible matching
+      // Escaping dots and replacing '*' with '.*'
+      const regexPattern = new RegExp(`^${allowedOriginPattern.replace(/\./g, '\\.').replace(/\*/g, '.*')}$`);
+
+      if (regexPattern.test(origin)) {
+        console.log(`[CORS] Origin ${origin} allowed by Socket.IO.`);
+        callback(null, true);
+      } else {
+        console.warn(`[CORS] Origin ${origin} NOT allowed by Socket.IO. Pattern: ${allowedOriginPattern}`);
+        callback(new Error('Not allowed by Socket.IO CORS'));
+      }
+    },
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true // IMPORTANT: Allow sending cookies/auth headers
   }
 });
 
-// --- Firebase Admin SDK Initialization (MODIFIED TO READ INDIVIDUAL ENV VARS) ---
+// --- Firebase Admin SDK Initialization ---
+console.log('[STARTUP] Initializing Firebase Admin SDK...');
 try {
   let serviceAccountConfig;
 
   if (process.env.NODE_ENV === 'production') {
-    // In production, reconstruct service account from individual environment variables
-    // IMPORTANT: The private_key needs its newline characters restored from the escaped string
     const privateKey = process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined;
 
     serviceAccountConfig = {
       type: process.env.FIREBASE_TYPE,
-      project_id: process.env.FIREBASE_PROJECT_ID_ADMIN, // Using a distinct name for clarity
+      project_id: process.env.FIREBASE_PROJECT_ID_ADMIN,
       private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
-      private_key: privateKey, // Use the reconstructed private key
+      private_key: privateKey,
       client_email: process.env.FIREBASE_CLIENT_EMAIL,
       client_id: process.env.FIREBASE_CLIENT_ID,
       auth_uri: process.env.FIREBASE_AUTH_URI,
@@ -50,73 +72,65 @@ try {
       auth_provider_x509_cert_url: process.env.FIREBASE_AUTH_PROVIDER_X509_CERT_URL,
       client_x509_cert_url: process.env.FIREBASE_CLIENT_X509_CERT_URL
     };
-    // Basic check to ensure critical fields are present
     if (!serviceAccountConfig.project_id || !serviceAccountConfig.private_key || !serviceAccountConfig.client_email) {
       throw new Error("Missing one or more critical Firebase Admin environment variables for production.");
     }
 
   } else {
-    // For local development, load from file as before
     serviceAccountConfig = require('./firebase-admin-key.json');
   }
 
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccountConfig)
   });
-  console.log('Firebase Admin SDK initialized.');
+  console.log('[STARTUP] Firebase Admin SDK initialized successfully.');
 } catch (error) {
-  console.error('CRITICAL ERROR: Firebase Admin SDK initialization failed. Details:', error);
+  console.error('[CRITICAL ERROR] Firebase Admin SDK initialization failed. Details:', error);
   console.error('Please ensure firebase-admin-key.json is present/valid locally, or ALL individual FIREBASE_ env vars are set correctly in production.');
-  process.exit(1); // Exit if critical service fails to initialize
+  process.exit(1);
 }
 
 
 io.on('connection', (socket) => {
-  console.log(`User connected: ${socket.id}`);
+  console.log(`[SOCKET.IO] User connected: ${socket.id}`);
 
   socket.on('registerUser', (userId) => {
     socket.join(userId);
-    console.log(`Socket ${socket.id} joined room for user ${userId}`);
+    console.log(`[SOCKET.IO] Socket ${socket.id} joined room for user ${userId}`);
   });
 
   socket.on('disconnect', () => {
-    console.log(`User disconnected: ${socket.id}`);
+    console.log(`[SOCKET.IO] User disconnected: ${socket.id}`);
   });
 });
 
+// Use CORS middleware for Express routes with dynamic origin and credentials
 app.use(cors({
-  origin: allowedOrigin,
-  methods: ["GET", "POST", "PUT", "DELETE"]
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    const regexPattern = new RegExp(`^${allowedOriginPattern.replace(/\./g, '\\.').replace(/\*/g, '.*')}$`);
+    if (regexPattern.test(origin)) {
+      console.log(`[CORS] Origin ${origin} allowed by Express.`);
+      callback(null, true);
+    } else {
+      console.warn(`[CORS] Origin ${origin} NOT allowed by Express. Pattern: ${allowedOriginPattern}`);
+      callback(new Error('Not allowed by Express CORS'));
+    }
+  },
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  credentials: true // IMPORTANT: Allow sending cookies/auth headers
 }));
 app.use(express.json());
 
+console.log('[STARTUP] Connecting to MongoDB...');
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('MongoDB connected successfully!'))
-  .catch(err => console.error('MongoDB connection error:', err));
+  .then(() => console.log('[STARTUP] MongoDB connected successfully!'))
+  .catch(err => {
+    console.error('[CRITICAL ERROR] MongoDB connection error:', err);
+    process.exit(1);
+  });
 
-const notificationSchema = new mongoose.Schema({
-  userId: { type: String, required: true, index: true },
-  type: {
-    type: String,
-    enum: ["application", "interview", "feedback", "job_post_status", "suspicious_activity"],
-    required: true
-  },
-  title: { type: String, required: true },
-  message: { type: String, required: true },
-  isRead: { type: Boolean, default: false },
-  link: { type: String, required: true },
-  createdAt: { type: Date, default: Date.now, index: true },
-  priority: {
-    type: String,
-    enum: ["high", "medium", "low"],
-    default: "medium"
-  },
-  priorityReason: { type: String },
-  suggestedActions: { type: [String], default: [] },
-});
-
-const Notification = mongoose.model('Notification', notificationSchema);
-
+console.log('[STARTUP] Setting up Nodemailer transporter...');
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: process.env.SMTP_PORT,
@@ -129,9 +143,9 @@ const transporter = nodemailer.createTransport({
 
 transporter.verify(function (error, success) {
   if (error) {
-    console.error("Nodemailer transporter verification failed:", error);
+    console.error("[CRITICAL ERROR] Nodemailer transporter verification failed:", error);
   } else {
-    console.log("Nodemailer transporter is ready to send messages");
+    console.log("[STARTUP] Nodemailer transporter is ready to send messages");
   }
 });
 
@@ -142,7 +156,7 @@ const compileTemplate = async (templateName, data) => {
     const template = handlebars.compile(source);
     return template(data);
   } catch (error) {
-    console.error(`Error compiling email template ${templateName}:`, error);
+    console.error(`[ERROR] Error compiling email template ${templateName}:`, error);
     throw new Error(`Could not compile email template: ${templateName}`);
   }
 };
@@ -158,9 +172,9 @@ const sendNotificationEmail = async ({ to, subject, templateName, templateData }
       html: htmlBody,
     };
     await transporter.sendMail(mailOptions);
-    console.log(`Email sent successfully to ${to} with subject: ${subject}`);
+    console.log(`[EMAIL] Email sent successfully to ${to} with subject: ${subject}`);
   } catch (error) {
-    console.error(`Error sending email to ${to}:`, error);
+    console.error(`[ERROR] Error sending email to ${to}:`, error);
   }
 };
 
@@ -187,7 +201,7 @@ const authenticateFirebaseToken = async (req, res, next) => {
     req.user = { id: decodedToken.uid, email: decodedToken.email };
     next();
   } catch (error) {
-    console.error('Error verifying Firebase ID token:', error);
+    console.error('[AUTH ERROR] Error verifying Firebase ID token:', error);
     return res.status(401).json({ message: 'Unauthorized: Invalid or expired Firebase ID token.' });
   }
 };
@@ -206,7 +220,7 @@ Output your response as a JSON object with two keys: "priority" (string: "high",
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-      console.warn('GEMINI_API_KEY is not set in .env. LLM priority will default to medium.');
+      console.warn('[WARNING] GEMINI_API_KEY is not set in .env. LLM priority will default to medium.');
       return { priority: 'medium', reason: 'API Key not configured.' };
   }
 
@@ -241,7 +255,7 @@ Output your response as a JSON object with two keys: "priority" (string: "high",
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Gemini API error response:', errorText);
+      console.error('[GEMINI ERROR] Gemini API error response:', errorText);
       throw new Error(`Gemini API request failed with status ${response.status}: ${errorText}`);
     }
 
@@ -258,15 +272,15 @@ Output your response as a JSON object with two keys: "priority" (string: "high",
           reason: parsedJson.reason
         };
       } else {
-        console.warn('Gemini returned unexpected JSON structure for priority:', parsedJson);
+        console.warn('[GEMINI WARNING] Gemini returned unexpected JSON structure for priority:', parsedJson);
         return { priority: 'medium', reason: 'LLM returned invalid format for priority. Defaulting to medium.' };
       }
     } else {
-      console.warn('Gemini response missing candidates or content for priority:', result);
+      console.warn('[GEMINI WARNING] Gemini response missing candidates or content for priority:', result);
       return { priority: 'medium', reason: 'LLM response structure unexpected for priority. Defaulting to medium.' };
     }
   } catch (error) {
-    console.error('Error calling Gemini API for priority:', error);
+    console.error('[GEMINI ERROR] Error calling Gemini API for priority:', error);
     return { priority: 'medium', reason: `Failed to get LLM priority: ${error.message}. Defaulting to medium.` };
   }
 };
@@ -296,7 +310,7 @@ Is this activity suspicious? Provide your response as a JSON object with two key
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-      console.warn('GEMINI_API_KEY is not set in .env. Skipping anomaly detection.');
+      console.warn('[WARNING] GEMINI_API_KEY is not set in .env. Skipping anomaly detection.');
       return { isSuspicious: false, reason: 'API Key not configured for anomaly detection.' };
   }
 
@@ -326,7 +340,7 @@ Is this activity suspicious? Provide your response as a JSON object with two key
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Gemini API error response for anomaly detection:', errorText);
+      console.error('[GEMINI ERROR] Gemini API error response for anomaly detection:', errorText);
       return { isSuspicious: false, reason: `LLM API failed: ${errorText}` };
     }
 
@@ -343,15 +357,15 @@ Is this activity suspicious? Provide your response as a JSON object with two key
           reason: parsedJson.reason
         };
       } else {
-        console.warn('Gemini returned unexpected JSON structure for anomaly detection:', parsedJson);
+        console.warn('[GEMINI WARNING] Gemini returned unexpected JSON structure for anomaly detection:', parsedJson);
         return { isSuspicious: false, reason: 'LLM returned invalid format for anomaly detection.' };
       }
     } else {
-      console.warn('Gemini response missing candidates or content for anomaly detection:', result);
+      console.warn('[GEMINI WARNING] Gemini response missing candidates or content for anomaly detection:', result);
       return { isSuspicious: false, reason: 'LLM response structure unexpected for anomaly detection.' };
     }
   } catch (error) {
-    console.error('Error calling Gemini API for anomaly detection:', error);
+    console.error('[GEMINI ERROR] Error calling Gemini API for anomaly detection:', error);
     return { isSuspicious: false, reason: `Failed to get LLM anomaly detection: ${error.message}` };
   }
 };
@@ -370,7 +384,7 @@ Output your response as a JSON array of strings, where each string is a suggeste
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-      console.warn('GEMINI_API_KEY is not set in .env. Skipping action suggestions.');
+      console.warn('[WARNING] GEMINI_API_KEY is not set in .env. Skipping action suggestions.');
       return [];
   }
 
@@ -396,7 +410,7 @@ Output your response as a JSON array of strings, where each string is a suggeste
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Gemini API error response for action suggestions:', errorText);
+      console.error('[GEMINI ERROR] Gemini API error response for action suggestions:', errorText);
       return [];
     }
 
@@ -410,15 +424,15 @@ Output your response as a JSON array of strings, where each string is a suggeste
       if (Array.isArray(parsedJson) && parsedJson.every(item => typeof item === 'string')) {
         return parsedJson;
       } else {
-        console.warn('Gemini returned unexpected JSON structure for action suggestions:', parsedJson);
+        console.warn('[GEMINI WARNING] Gemini returned unexpected JSON structure for action suggestions:', parsedJson);
         return [];
       }
     } else {
-      console.warn('Gemini response missing candidates or content for action suggestions:', result);
+      console.warn('[GEMINI WARNING] Gemini response missing candidates or content for action suggestions:', result);
       return [];
     }
   } catch (error) {
-    console.error('Error calling Gemini API for action suggestions:', error);
+    console.error('[GEMINI ERROR] Error calling Gemini API for action suggestions:', error);
     return [];
   }
 };
@@ -445,7 +459,7 @@ app.post('/api/notification/send', createNotificationLimiter, authenticateFireba
     });
 
     if (existingNotification) {
-      console.log('Duplicate notification prevented:', { userId: authenticatedUserId, type, title });
+      console.log('[INFO] Duplicate notification prevented:', { userId: authenticatedUserId, type, title });
       return res.status(409).json({ message: 'Duplicate notification detected. Not sending.' });
     }
 
@@ -466,15 +480,15 @@ app.post('/api/notification/send', createNotificationLimiter, authenticateFireba
     });
 
     await newNotification.save();
-    console.log('In-app notification saved:', newNotification);
+    console.log('[INFO] In-app notification saved:', newNotification);
 
     io.to(authenticatedUserId).emit('newNotification', newNotification);
-    console.log(`Emitted 'newNotification' to user ${authenticatedUserId}`);
+    console.log(`[SOCKET.IO] Emitted 'newNotification' to user ${authenticatedUserId}`);
 
     const { isSuspicious, reason: suspiciousReason } = await detectSuspiciousActivity(type, title, message);
 
     if (isSuspicious) {
-      console.warn(`Suspicious activity detected for user ${authenticatedUserId}: ${suspiciousReason}`);
+      console.warn(`[WARNING] Suspicious activity detected for user ${authenticatedUserId}: ${suspiciousReason}`);
       const suspiciousNotification = new Notification({
         userId: authenticatedUserId,
         type: 'suspicious_activity',
@@ -488,7 +502,7 @@ app.post('/api/notification/send', createNotificationLimiter, authenticateFireba
       });
       await suspiciousNotification.save();
       io.to(authenticatedUserId).emit('newNotification', suspiciousNotification);
-      console.log(`Emitted 'suspicious_activity' notification to user ${authenticatedUserId}`);
+      console.log(`[SOCKET.IO] Emitted 'suspicious_activity' notification to user ${authenticatedUserId}`);
     }
 
 
@@ -503,7 +517,7 @@ app.post('/api/notification/send', createNotificationLimiter, authenticateFireba
 
     res.status(201).json({ message: 'Notification sent and saved successfully', notification: newNotification });
   } catch (error) {
-    console.error('Error sending notification:', error);
+    console.error('[API ERROR] Error sending notification:', error);
     res.status(500).json({ message: 'Internal server error', error: error.message });
   }
 });
@@ -524,7 +538,7 @@ app.get('/api/notification/:userId', authenticateFirebaseToken, async (req, res)
 
     res.status(200).json(notifications);
   } catch (error) {
-    console.error('Error fetching notifications:', error);
+    console.error('[API ERROR] Error fetching notifications:', error);
     res.status(500).json({ message: 'Internal server error', error: error.message });
   }
 });
@@ -538,7 +552,7 @@ app.post('/api/notification/read', authenticateFirebaseToken, async (req, res) =
     if (notificationIds === undefined && req.body.markAll === true) {
       await Notification.updateMany({ userId: authenticatedUserId }, { $set: { isRead: isRead } });
       io.to(authenticatedUserId).emit('notificationsUpdated', { type: 'markAll', userId: authenticatedUserId, isRead: isRead });
-      console.log(`Emitted 'notificationsUpdated' (markAll) to user ${authenticatedUserId}`);
+      console.log(`[SOCKET.IO] Emitted 'notificationsUpdated' (markAll) to user ${authenticatedUserId}`);
       res.status(200).json({ message: `All notifications for user ${authenticatedUserId} marked as ${isRead ? 'read' : 'unread'}.` });
     } else if (notificationIds && Array.isArray(notificationIds) && notificationIds.length > 0) {
       const notificationsToUpdate = await Notification.find({ _id: { $in: notificationIds } });
@@ -556,13 +570,13 @@ app.post('/api/notification/read', authenticateFirebaseToken, async (req, res) =
         { $set: { isRead: isRead } }
       );
       io.to(authenticatedUserId).emit('notificationsUpdated', { type: 'markSpecific', notificationIds: notificationIds, isRead: isRead, userId: authenticatedUserId });
-      console.log(`Emitted 'notificationsUpdated' (markSpecific) to user ${authenticatedUserId}`);
+      console.log(`[SOCKET.IO] Emitted 'notificationsUpdated' (markSpecific) to user ${authenticatedUserId}`);
       res.status(200).json({ message: `Notifications marked as ${isRead ? 'read' : 'unread'}.` });
     } else {
       return res.status(400).json({ message: 'Invalid request. Provide notificationIds or markAll with isRead.' });
     }
   } catch (error) {
-    console.error('Error marking notifications:', error);
+    console.error('[API ERROR] Error marking notifications:', error);
     res.status(500).json({ message: 'Internal server error', error: error.message });
   }
 });
@@ -587,11 +601,11 @@ app.delete('/api/notification/:id', authenticateFirebaseToken, async (req, res) 
 
     await Notification.findByIdAndDelete(id);
     io.to(authenticatedUserId).emit('notificationDeleted', { id: id, userId: authenticatedUserId });
-    console.log(`Emitted 'notificationDeleted' for ID ${id} to user ${authenticatedUserId}`);
+    console.log(`[SOCKET.IO] Emitted 'notificationDeleted' for ID ${id} to user ${authenticatedUserId}`);
 
     res.status(200).json({ message: 'Notification deleted successfully.' });
   } catch (error) {
-    console.error('Error deleting notification:', error);
+    console.error('[API ERROR] Error deleting notification:', error);
     res.status(500).json({ message: 'Internal server error', error: error.message });
   }
 });
@@ -602,6 +616,7 @@ app.get('/', (req, res) => {
   res.send('Notification System Backend is running!');
 });
 
+// Start the server (NOTE: We now listen on `server` not `app`)
 server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`[STARTUP] Server listening on port ${PORT}`);
 });
