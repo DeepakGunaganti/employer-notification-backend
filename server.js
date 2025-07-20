@@ -17,21 +17,14 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 console.log(`[STARTUP] Attempting to start server on port: ${PORT}`);
 
-// Get the base frontend domain from environment variable
-// This FRONTEND_URL env var should be ONLY the base domain, e.g., "employe-note-frontend.vercel.app"
-const baseFrontendDomain = process.env.NODE_ENV === 'production'
+const allowedOriginPattern = process.env.NODE_ENV === 'production'
   ? process.env.FRONTEND_URL
-  : 'localhost:3000'; // For local development
+  : 'localhost:3000';
 
-// Construct the allowed origins array for CORS
-// This will include "http://localhost:3000" for dev,
-// and "https://base.domain" and "https://*.base.domain" for production
 const allowedOrigins = [];
 if (process.env.NODE_ENV === 'production') {
-  // Allow the base domain itself (e.g., https://employe-note-frontend.vercel.app)
-  allowedOrigins.push(`https://${baseFrontendDomain}`);
-  // Allow all subdomains (e.g., https://*.employe-note-frontend.vercel.app)
-  allowedOrigins.push(`https://*.${baseFrontendDomain}`);
+  allowedOrigins.push(`https://${allowedOriginPattern}`);
+  allowedOrigins.push(`https://*.${allowedOriginPattern}`);
 } else {
   allowedOrigins.push('http://localhost:3000');
 }
@@ -41,23 +34,18 @@ console.log(`[STARTUP] CORS allowed origins list: ${allowedOrigins.join(', ')}`)
 
 const server = http.createServer(app);
 
-// Initialize Socket.io server with dynamic origin handling and credentials
 const io = new Server(server, {
   cors: {
-    // Use a function to dynamically allow origins matching the pattern
     origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps or curl requests)
       if (!origin) return callback(null, true);
 
-      // Check if the origin is in our allowed list or matches a wildcard pattern
       const isAllowed = allowedOrigins.some(allowed => {
-        if (allowed === origin) { // Direct match (e.g., https://my-app.vercel.app)
+        if (allowed === origin) {
           return true;
         }
-        // Handle wildcard origins (e.g., https://*.vercel.app)
         if (allowed.startsWith('https://*.')) {
-          const pattern = allowed.replace(/\./g, '\\.').replace(/\*/g, '.*'); // Escape dots, convert * to .*
-          const regex = new RegExp(`^${pattern}$`); // Create regex from pattern
+          const pattern = allowed.replace(/\./g, '\\.').replace(/\*/g, '.*');
+          const regex = new RegExp(`^${pattern}$`);
           return regex.test(origin);
         }
         return false;
@@ -72,11 +60,10 @@ const io = new Server(server, {
       }
     },
     methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true // IMPORTANT: Allow sending cookies/auth headers
+    credentials: true
   }
 });
 
-// --- Firebase Admin SDK Initialization ---
 console.log('[STARTUP] Initializing Firebase Admin SDK...');
 try {
   let serviceAccountConfig;
@@ -128,7 +115,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// Use CORS middleware for Express routes with dynamic origin and credentials
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
@@ -153,7 +139,7 @@ app.use(cors({
     }
   },
   methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true // IMPORTANT: Allow sending cookies/auth headers
+  credentials: true
 }));
 app.use(express.json());
 
@@ -164,6 +150,34 @@ mongoose.connect(process.env.MONGO_URI)
     console.error('[CRITICAL ERROR] MongoDB connection error:', err);
     process.exit(1);
   });
+
+// --- MongoDB Notification Schema and Model (MOVED HERE) ---
+// Define schema immediately after successful MongoDB connection
+console.log('[STARTUP] Defining MongoDB Notification Schema and Model...');
+const notificationSchema = new mongoose.Schema({
+  userId: { type: String, required: true, index: true },
+  type: {
+    type: String,
+    enum: ["application", "interview", "feedback", "job_post_status", "suspicious_activity"],
+    required: true
+  },
+  title: { type: String, required: true },
+  message: { type: String, required: true },
+  isRead: { type: Boolean, default: false },
+  link: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now, index: true },
+  priority: {
+    type: String,
+    enum: ["high", "medium", "low"],
+    default: "medium"
+  },
+  priorityReason: { type: String },
+  suggestedActions: { type: [String], default: [] },
+});
+
+const Notification = mongoose.model('Notification', notificationSchema);
+console.log('[STARTUP] Notification model defined.');
+
 
 console.log('[STARTUP] Setting up Nodemailer transporter...');
 const transporter = nodemailer.createTransport({
